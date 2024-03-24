@@ -1,4 +1,7 @@
-﻿using ScapeCore.Core.Tools;
+﻿using ScapeCore.Core.SceneManagement;
+using ScapeCore.Core.Serialization.Streamers;
+using ScapeCore.Core.Serialization;
+using ScapeCore.Core.Tools;
 using ScapeCore.Traceability.Logging;
 using ScapeCore.Traceability.Syntax;
 using System;
@@ -27,59 +30,63 @@ namespace ScapeCore.Core.Debug
         private static Debugger? _default = null;
         public static Debugger? Default { get => _default; set => _default = value; }
 
-        private readonly List<IScapeCoreService?> _services = [_log];
+        private readonly List<IScapeCoreService?> _services = new();
         List<IScapeCoreService?> IScapeCoreManager.Services => _services;
 
         public Debugger()
         {
-            _log ??= new([
-            (0, new ConsoleErrorSink(ERROR, new LoggingColor(255, 58, 36))),
-                (1, new ConsoleErrorSink(WARNING, new LoggingColor(255, 129, 26))),
-                (2, new ConsoleOutputSink(INPUT, new LoggingColor(100, 200, 208))),
-                (3, new ConsoleOutputSink(INFORMATION, new LoggingColor(128, 117, 108))),
-                (4, new ConsoleOutputSink(DEBUG, new LoggingColor(128, 117, 108))),
-                (5, new ConsoleErrorSink(VERBOSE, new LoggingColor(50, 129, 26))),
-            ])
+            if (_log == null)
             {
-                Name = "Test",
-                Directory = Directory.CreateTempSubdirectory("ScapeCore"),
-                Template = () => $"{new LoggingColor(255, 253, 125)}[{DateTime.Now:T}]{LoggingColor.Default}",
-                MinimumLoggingLevel = 4
-            };
+                _log ??= new([
+(0, new ConsoleErrorSink(ERROR, new LoggingColor(255, 58, 36))),
+                    (1, new ConsoleErrorSink(WARNING, new LoggingColor(255, 129, 26))),
+                    (2, new ConsoleOutputSink(INPUT, new LoggingColor(100, 200, 208))),
+                    (3, new ConsoleOutputSink(INFORMATION, new LoggingColor(128, 117, 108))),
+                    (4, new ConsoleOutputSink(DEBUG, new LoggingColor(128, 117, 108))),
+                    (5, new ConsoleErrorSink(VERBOSE, new LoggingColor(50, 129, 26))),
+                ])
+                {
+                    Name = "Test",
+                    Directory = Directory.CreateTempSubdirectory("ScapeCore"),
+                    Template = () => $"{new LoggingColor(255, 253, 125)}[{DateTime.Now:T}]{LoggingColor.Default}",
+                    MinimumLoggingLevel = 4
+                };
 
-            Directory.SetCurrentDirectory(_log.Directory.FullName);
-            var helpCommand = new Command(new("HELP", 0, "Generates a help list that contains all the available commands."), (_) =>
-            {
-                var sb = new StringBuilder();
-                sb.AppendLine("Available Commands for the CLI");
-                foreach (var command in _log.LinkedParser.AvailableCommands.OrderBy(n => n.Info.Name))
-                    sb.AppendLine(command.ToString());
-                Console.Write(sb.ToString());
-            }, addHelp: true);
-            var helpByCommand = new Command(new("-C", 1, "Generates the help for a specific command."), (p) =>
-            {
-                var sb = new StringBuilder();
-                sb.AppendLine("Available Commands for the CLI");
-                var val = _log.LinkedParser.AvailableCommands.Find(x =>
-                                           x.Info.Name.Equals(p?.FirstOrDefault() as string,
-                                           StringComparison.OrdinalIgnoreCase))?.ToString();
-                if (!string.IsNullOrEmpty(val))
-                    sb.AppendLine(val);
-                Console.Write(sb.ToString());
-                helpCommand.suppress = true;
-            }, helpCommand, true);
-            helpCommand.AddSubcommand(helpByCommand);
-            var clearCommand = new Command(new("CLEAR", 0, "Clears the display."), (_) => Console.Clear(), addHelp: true);
+                Directory.SetCurrentDirectory(_log.Directory.FullName);
+                var helpCommand = new Command(new("HELP", 0, "Generates a help list that contains all the available commands."), (_) =>
+                {
+                    var sb = new StringBuilder();
+                    sb.AppendLine("Available Commands for the CLI");
+                    foreach (var command in _log.LinkedParser.AvailableCommands.OrderBy(n => n.Info.Name))
+                        sb.AppendLine(command.ToString());
+                    Console.Write(sb.ToString());
+                }, addHelp: true);
+                var helpByCommand = new Command(new("-C", 1, "Generates the help for a specific command."), (p) =>
+                {
+                    var sb = new StringBuilder();
+                    sb.AppendLine("Available Commands for the CLI");
+                    var val = _log.LinkedParser.AvailableCommands.Find(x =>
+                                               x.Info.Name.Equals(p?.FirstOrDefault() as string,
+                                               StringComparison.OrdinalIgnoreCase))?.ToString();
+                    if (!string.IsNullOrEmpty(val))
+                        sb.AppendLine(val);
+                    Console.Write(sb.ToString());
+                    helpCommand.suppress = true;
+                }, helpCommand, true);
+                helpCommand.AddSubcommand(helpByCommand);
+                var clearCommand = new Command(new("CLEAR", 0, "Clears the display."), (_) => Console.Clear(), addHelp: true);
 
-            Command[] commands = [
-                helpCommand,
-                clearCommand,
-            ];
+                Command[] commands = [
+                    helpCommand,
+                    clearCommand,
+                ];
 
-            _log.LinkedParser.AvailableCommands.AddRange(commands);
+                _log.LinkedParser.AvailableCommands.AddRange(commands);
 
-            commandParsingTask = _log.WaitForCommands();
-            _default ??= this;
+                commandParsingTask = _log.WaitForCommands();
+                _default ??= this;
+                _services = [_log];
+            }
         }
 
         public async ValueTask DisposeAsync() => await (this as IAsyncDisposable).DisposeAsync();
@@ -95,7 +102,42 @@ namespace ScapeCore.Core.Debug
             return true;
         }
 
-        public void InjectLoggers<T>(params T[] loggers) where T : IScapeCoreService, ILogger => (this as IScapeCoreManager).InjectDependencies(loggers as IScapeCoreService[] ?? throw new NullReferenceException());
+        public void InjectLoggers<T>(params T[] loggers) where T : IScapeCoreService, ILogger
+        {
+            if (!(this as IScapeCoreManager).InjectDependencies(loggers as IScapeCoreService[] ?? throw new NullReferenceException()))
+                throw new ArgumentException($"The loggers injected to this {nameof(Debugger)} are not valid. Check if they are correct and try again.");
+            else
+                SCLog.Log(DEBUG, $"Logger dependencies were successfully injected.");
+        }
+
+        private bool ExtractDependenciesLocal(params IScapeCoreService[] services)
+        {
+            if (services.Length <= 0) return true;
+
+            foreach (var service in services)
+            {
+                if (service is ILogger and IScapeCoreService logger)
+                {
+                    var i = _services.IndexOf(logger);
+                    if (i == -1) return false;
+                    _services.RemoveAt(i);
+                }
+                else return false;
+            }
+
+            return true;
+        }
+
+        bool IScapeCoreManager.ExtractDependencies(params IScapeCoreService[] services)
+        {
+            var result = services.Length <= 0 ? ExtractDependenciesLocal([.. _services]) :
+                                                ExtractDependenciesLocal(services);
+            if (result == false)
+                throw new ArgumentException($"The loggers extracted from this {nameof(Debugger)} are not valid. Check if they are correct and try again.");
+            else
+                SCLog.Log(DEBUG, $"Loggers were succesfully extracted from {nameof(Debugger)}.");
+            return result;
+        }
 
         ValueTask IAsyncDisposable.DisposeAsync() => _log.DisposeAsync();
     }
