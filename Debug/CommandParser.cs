@@ -12,6 +12,11 @@ namespace ScapeCore.Traceability.Syntax
     public class CommandParser(TerminalLogger linkedLogger) : IScapeCoreService
     {
         public TerminalLogger LinkedLogger { get; init; } = linkedLogger;
+
+        public string Name => LinkedLogger.Name;
+
+        public Guid Id => ((IScapeCoreService)LinkedLogger).Id;
+
         bool _isRunning = true;
         public readonly List<Command> AvailableCommands = [];
 

@@ -29,6 +29,9 @@ namespace ScapeCore.Traceability.Logging
         public ISink[] Sinks { get => [.. _sinks.Select(x => x.sink)]; }
         public static object Lock => _lock;
 
+        private readonly Guid _id = Guid.NewGuid();
+        public Guid Id => _id;
+
         private TerminalLogger() => _ = 0;
         public TerminalLogger(params (uint index, ISink sink)[] sinks)
         {
